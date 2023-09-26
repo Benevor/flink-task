@@ -27,9 +27,6 @@ public class SocketStreamWordCount {
         // 合并两个数据流
         DataStream<String> mergedStream = socketTextStream1.union(socketTextStream2);
 
-        // 每来一个新的事务，创建一个新的数据流
-
-
         DataStream<Tuple2<String, Integer>> sum = mergedStream.flatMap(new SocketStreamFlatMapFunction()).keyBy(0).sum(1);
 
         sum.print();
