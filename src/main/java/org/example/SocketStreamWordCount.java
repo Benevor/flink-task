@@ -1,17 +1,20 @@
 package org.example;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
+import org.apache.flink.configuration.Configuration;
 
-// Flink任务的Java类名
 public class SocketStreamWordCount {
     public static void main(String[] args) throws Exception {
         final int ARGS_LENGTH = 3;
         if (args.length < ARGS_LENGTH) {
-            System.err.println("参数验证失败，请输入正确的参数");
+            System.err.println("Parameter validation failed, please enter the correct parameters.");
             return;
         }
 
@@ -21,26 +24,57 @@ public class SocketStreamWordCount {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        // 创建两个数据流，分别用于接收两个不同的端口数据
         DataStream<String> socketTextStream1 = env.socketTextStream(hostname, port1);
         DataStream<String> socketTextStream2 = env.socketTextStream(hostname, port2);
-        // 合并两个数据流
         DataStream<String> mergedStream = socketTextStream1.union(socketTextStream2);
 
-        DataStream<Tuple2<String, Integer>> sum = mergedStream.flatMap(new SocketStreamFlatMapFunction()).keyBy(0).sum(1);
+        DataStream<Tuple2<String, Integer>> sum = mergedStream
+                .flatMap(new SocketStreamFlatMapFunction())
+                .keyBy(word -> word) // 按照单词分流
+                .process(new CountWordsProcessFunction());
 
         sum.print();
 
         env.execute("SocketStream");
     }
 
-    public static class SocketStreamFlatMapFunction implements FlatMapFunction<String, Tuple2<String, Integer>> {
+    public static class SocketStreamFlatMapFunction implements FlatMapFunction<String, String> {
         @Override
-        public void flatMap(String s, Collector<Tuple2<String, Integer>> collector) throws Exception{
+        public void flatMap(String s, Collector<String> collector) throws Exception {
             String[] words = s.split(" ");
             for (String word : words) {
-                collector.collect(new Tuple2<>(word, 1));
+                collector.collect(word);
             }
+        }
+    }
+
+    public static class CountWordsProcessFunction extends ProcessFunction<String, Tuple2<String, Integer>> {
+        // 使用state来保存单词计数
+        private transient ValueState<Integer> countState;
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            // 初始化状态
+            ValueStateDescriptor<Integer> descriptor = new ValueStateDescriptor<>("wordCount", Integer.class);
+            countState = getRuntimeContext().getState(descriptor);
+        }
+
+        @Override
+        public void processElement(String input, Context context, Collector<Tuple2<String, Integer>> collector) throws Exception {
+            // 使用单词作为键，每个单词独立计数
+            Integer currentCount = countState.value();
+            if (currentCount == null) {
+                currentCount = 1;
+            } else {
+                currentCount++;
+                if (currentCount == 3){
+                    currentCount = 1;
+                }
+            }
+            countState.update(currentCount);
+
+            // 发射当前单词和计数（以流的形式向下传递）
+            collector.collect(new Tuple2<>(input, currentCount));
         }
     }
 }
