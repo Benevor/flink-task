@@ -48,6 +48,7 @@ public class SocketStreamWordCount {
         }
     }
 
+    // 在 Flink 中，处理函数实例的生命周期由 Flink 的任务管理器（TaskManager）负责管理。
     public static class CountWordsProcessFunction extends ProcessFunction<String, Tuple2<String, Integer>> {
         // 使用state来保存单词计数
         private transient ValueState<Integer> countState;
@@ -67,14 +68,15 @@ public class SocketStreamWordCount {
                 currentCount = 1;
             } else {
                 currentCount++;
-                if (currentCount == 3){
-                    currentCount = 1;
-                }
             }
-            countState.update(currentCount);
 
-            // 发射当前单词和计数（以流的形式向下传递）
-            collector.collect(new Tuple2<>(input, currentCount));
+            if (currentCount == 3){
+                // 发射当前单词和计数到3（以流的形式向下传递）
+                collector.collect(new Tuple2<>(input, currentCount));
+                countState.clear();
+            }else{
+                countState.update(currentCount);
+            }
         }
     }
 }
